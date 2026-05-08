@@ -5,6 +5,8 @@ import connectDB from './config/db.js';
 import userRoutes from './routes/userRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import ownerRoutes from './routes/ownerRoutes.js';
+import paymentRoutes from "./routes/paymentRoutes.js";
+import reviewRoutes from "./routes/reviewRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -17,6 +19,8 @@ app.use(express.json());
 app.use('/api/user', userRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/owner', ownerRoutes);
+app.use("/api/payment", paymentRoutes);
+app.use("/api/reviews", reviewRoutes);
 
 // Health check
 app.get('/', (req, res) => {

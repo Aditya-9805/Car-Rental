@@ -8,43 +8,96 @@ import { useAppContext } from '../context/AppContext';
 const CarDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { backendUrl, user, token, setShowLogin, pickupDate, setPickupDate, returnDate, setReturnDate } = useAppContext();
+
+  const {
+    backendUrl,
+    user,
+    token,
+    setShowLogin,
+    pickupDate,
+    setPickupDate,
+    returnDate,
+    setReturnDate,
+  } = useAppContext();
 
   const [car, setCar] = useState(null);
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(false);
   const [isAvailable, setIsAvailable] = useState(null);
+  const [reviews, setReviews] = useState([]);
+  const [averageRating, setAverageRating] = useState(0);
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState("");
 
   useEffect(() => {
-    const fetchCar = async () => {
-      try {
-        const { data } = await axios.get(`${backendUrl}/api/user/cars`);
-        if (data.success) {
-          const foundCar = data.cars.find((c) => c._id === id);
-          if (foundCar) {
-            setCar(foundCar);
-          } else {
-            toast.error('Car not found');
-            navigate('/cars');
-          }
+
+  const fetchCar = async () => {
+    try {
+
+      const { data } = await axios.get(
+        `${backendUrl}/api/user/cars`
+      );
+
+      if (data.success) {
+
+        const foundCar =
+          data.cars.find((c) => c._id === id);
+
+        if (foundCar) {
+          setCar(foundCar);
+        } else {
+          toast.error('Car not found');
+          navigate('/cars');
         }
-      } catch (error) {
-        toast.error('Failed to load car details');
-        navigate('/cars');
-      } finally {
-        setLoading(false);
       }
-    };
 
-    fetchCar();
-  }, [id]);
+    } catch (error) {
 
-  // Calculate total price
-  const totalDays = pickupDate && returnDate
-    ? Math.max(1, Math.ceil((new Date(returnDate) - new Date(pickupDate)) / (1000 * 60 * 60 * 24)))
-    : 0;
+      toast.error('Failed to load car details');
+      navigate('/cars');
+
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchReviews = async () => {
+    try {
+
+      const { data } = await axios.get(
+        `${backendUrl}/api/reviews/${id}`
+      );
+
+      if (data.success) {
+        setReviews(data.reviews);
+        setAverageRating(data.averageRating);
+      }
+
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  fetchCar();
+  fetchReviews();
+
+}, [id]);
+
+  // Total Price Calculation
+  const totalDays =
+    pickupDate && returnDate
+      ? Math.max(
+          1,
+          Math.ceil(
+            (new Date(returnDate) - new Date(pickupDate)) /
+              (1000 * 60 * 60 * 24)
+          )
+        )
+      : 0;
+
   const totalPrice = car ? totalDays * car.pricePerDay : 0;
 
+  // Check Availability
   const checkAvailability = async () => {
     if (!pickupDate || !returnDate) {
       toast.error('Please select both dates');
@@ -57,25 +110,81 @@ const CarDetails = () => {
     }
 
     try {
-      const { data } = await axios.post(`${backendUrl}/api/bookings/check-availability`, {
-        carId: id,
-        pickupDate,
-        returnDate,
-      });
+      const { data } = await axios.post(
+        `${backendUrl}/api/bookings/check-availability`,
+        {
+          carId: id,
+          pickupDate,
+          returnDate,
+        }
+      );
 
       if (data.success) {
         setIsAvailable(data.available);
+
         if (data.available) {
-          toast.success('Car is available for your dates!');
+          toast.success('Car is available!');
         } else {
-          toast.error('Car is not available for these dates');
+          toast.error('Car is not available');
         }
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to check availability');
+      toast.error(
+        error.response?.data?.message || 'Failed to check availability'
+      );
     }
   };
 
+  const submitReview = async () => {
+
+  if (!token) {
+    setShowLogin(true);
+    return;
+  }
+
+  try {
+
+    const { data } = await axios.post(
+      `${backendUrl}/api/reviews/add`,
+      {
+        carId: id,
+        rating,
+        comment,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (data.success) {
+
+      toast.success("Review added!");
+
+      setComment("");
+      setRating(5);
+
+      const updatedReviews = await axios.get(
+        `${backendUrl}/api/reviews/${id}`
+      );
+
+      setReviews(updatedReviews.data.reviews);
+      setAverageRating(
+        updatedReviews.data.averageRating
+      );
+    }
+
+  } catch (error) {
+
+    toast.error(
+      error.response?.data?.message ||
+      "Failed to add review"
+    );
+  }
+};
+
+  // Razorpay Booking
   const handleBooking = async () => {
     if (!token) {
       setShowLogin(true);
@@ -88,19 +197,80 @@ const CarDetails = () => {
     }
 
     setBooking(true);
-    try {
-      const { data } = await axios.post(`${backendUrl}/api/bookings/create`, {
-        carId: id,
-        pickupDate,
-        returnDate,
-      });
 
-      if (data.success) {
-        toast.success('Booking created successfully!');
-        navigate('/my-bookings');
+    try {
+
+      // Create Razorpay Order
+      const { data } = await axios.post(
+        `${backendUrl}/api/payment/create-order`,
+        {
+          amount: totalPrice,
+        }
+      );
+
+      if (!data.success) {
+        toast.error("Failed to initiate payment");
+        return;
       }
+
+      // Razorpay Popup
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount: data.order.amount,
+        currency: data.order.currency,
+        name: "DriveEase",
+        description: "Car Booking Payment",
+        order_id: data.order.id,
+
+        handler: async function (response) {
+
+  // Verify payment
+  const verifyRes = await axios.post(
+    `${backendUrl}/api/payment/verify-payment`,
+    {
+      razorpay_order_id: response.razorpay_order_id,
+      razorpay_payment_id: response.razorpay_payment_id,
+      razorpay_signature: response.razorpay_signature,
+    }
+  );
+
+  if (!verifyRes.data.success) {
+    toast.error("Payment verification failed");
+    return;
+  }
+
+  // Create booking after verification
+  const bookingRes = await axios.post(
+    `${backendUrl}/api/bookings/create`,
+    {
+      carId: id,
+      pickupDate,
+      returnDate,
+    }
+  );
+
+  if (bookingRes.data.success) {
+    toast.success("Payment Verified & Booking Confirmed!");
+    navigate("/my-bookings");
+  }
+},
+
+        prefill: {
+          name: user?.name || "",
+          email: user?.email || "",
+        },
+
+        theme: {
+          color: "#3B82F6",
+        },
+      };
+
+      const razor = new window.Razorpay(options);
+      razor.open();
+
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Booking failed');
+      console.log(error);
+      toast.error(error.response?.data?.message || "Payment failed");
     } finally {
       setBooking(false);
     }
@@ -116,200 +286,258 @@ const CarDetails = () => {
 
   if (!car) return null;
 
-  const specs = [
-    { icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', label: 'Year', value: car.year },
-    { icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10', label: 'Category', value: car.category },
-    { icon: 'M13 10V3L4 14h7v7l9-11h-7z', label: 'Fuel', value: car.fuelType },
-    { icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', label: 'Transmission', value: car.transmission },
-    { icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z', label: 'Seats', value: `${car.seatingCapacity} Passengers` },
-    { icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z', label: 'Location', value: car.location },
-  ];
-
   return (
     <div className="min-h-screen pt-24 pb-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left: Car Info */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Image */}
+
+          {/* Left Side */}
+          <div className="lg:col-span-2">
+
             <motion.div
-              initial={{ opacity: 0, y: 30 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
               className="glass rounded-2xl overflow-hidden"
             >
-              <div className="relative h-64 sm:h-96">
-                <img
-                  src={car.image}
-                  alt={`${car.brand} ${car.model}`}
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-surface-dark/60 via-transparent to-transparent" />
-                <span className="absolute top-4 left-4 px-4 py-1.5 text-sm font-semibold rounded-full bg-primary/20 text-primary-light backdrop-blur-sm border border-primary/20">
-                  {car.category}
-                </span>
-              </div>
-            </motion.div>
 
-            {/* Title & Details */}
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.15 }}
-              className="glass rounded-2xl p-6"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h1 className="text-2xl sm:text-3xl font-bold">{car.brand} {car.model}</h1>
-                  <div className="flex items-center gap-2 text-slate-400 text-sm mt-1">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    {car.location}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-2xl font-bold gradient-text">₹{car.pricePerDay?.toLocaleString()}</p>
-                  <p className="text-sm text-slate-400">per day</p>
-                </div>
-              </div>
+              <img
+                src={car.image}
+                alt={`${car.brand} ${car.model}`}
+                className="w-full h-[400px] object-cover"
+              />
 
-              {car.description && (
-                <p className="text-slate-300 text-sm leading-relaxed mb-6">{car.description}</p>
-              )}
+              <div className="p-6">
 
-              {/* Specs Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {specs.map((spec, i) => (
-                  <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-surface-dark/50 border border-slate-700/30">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                      <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={spec.icon} />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-400">{spec.label}</p>
-                      <p className="text-sm font-semibold text-white">{spec.value}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
+                <div className="flex justify-between items-start mb-4">
 
-            {/* Owner Info */}
-            {car.owner && (
-              <motion.div
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.3 }}
-                className="glass rounded-2xl p-6"
-              >
-                <h3 className="text-lg font-semibold mb-4">Listed By</h3>
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white font-bold text-lg">
-                    {car.owner.name?.charAt(0).toUpperCase()}
-                  </div>
                   <div>
-                    <p className="font-semibold">{car.owner.name}</p>
-                    <p className="text-sm text-slate-400">{car.owner.email}</p>
+                    <h1 className="text-3xl font-bold">
+                      {car.brand} {car.model}
+                    </h1>
+
+                    <p className="text-slate-400 mt-1">
+                      {car.location}
+                    </p>
+                    <div className="flex items-center gap-2 mt-2">
+
+                      <span className="text-yellow-400 text-lg">
+                        ⭐
+                      </span>
+
+                      <span className="font-semibold">
+                        {averageRating || 0}
+                      </span>
+
+                      <span className="text-slate-400 text-sm">
+                        ({reviews.length} reviews)
+                      </span>
+
+                    </div>
                   </div>
+
+                  <div className="text-right">
+                    <p className="text-3xl font-bold gradient-text">
+                      ₹{car.pricePerDay}
+                    </p>
+
+                    <p className="text-sm text-slate-400">
+                      per day
+                    </p>
+                  </div>
+
                 </div>
-              </motion.div>
-            )}
+
+                <p className="text-slate-300 leading-relaxed">
+                  {car.description}
+                </p>
+
+              </div>
+            </motion.div>
+                        <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="glass rounded-2xl p-6 mt-6"
+            >
+
+              <h2 className="text-2xl font-bold mb-4">
+                Reviews & Ratings
+              </h2>
+
+              {/* Add Review */}
+              <div className="space-y-4 mb-8">
+
+                <select
+                  value={rating}
+                  onChange={(e) => setRating(e.target.value)}
+                  className="input-field"
+                >
+                  <option value="5">⭐ 5 Stars</option>
+                  <option value="4">⭐ 4 Stars</option>
+                  <option value="3">⭐ 3 Stars</option>
+                  <option value="2">⭐ 2 Stars</option>
+                  <option value="1">⭐ 1 Star</option>
+                </select>
+
+                <textarea
+                  rows="4"
+                  placeholder="Write your review..."
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  className="input-field"
+                />
+
+                <button
+                  onClick={submitReview}
+                  className="btn-primary"
+                >
+                  Submit Review
+                </button>
+
+              </div>
+
+              {/* Reviews List */}
+              <div className="space-y-4">
+
+                {reviews.length === 0 ? (
+
+                  <p className="text-slate-400">
+                    No reviews yet
+                  </p>
+
+                ) : (
+
+                  reviews.map((review) => (
+
+                    <div
+                      key={review._id}
+                      className="bg-surface-dark/40 p-4 rounded-xl border border-slate-700/40"
+                    >
+
+                      <div className="flex items-center justify-between mb-2">
+
+                        <h3 className="font-semibold">
+                          {review.user?.name}
+                        </h3>
+
+                        <span className="text-yellow-400">
+                          {'⭐'.repeat(review.rating)}
+                        </span>
+
+                      </div>
+
+                      <p className="text-slate-300">
+                        {review.comment}
+                      </p>
+
+                    </div>
+                  ))
+                )}
+
+              </div>
+
+            </motion.div>
           </div>
 
-          {/* Right: Booking Sidebar */}
+          
+
+          {/* Booking Sidebar */}
           <motion.div
-            initial={{ opacity: 0, x: 30 }}
+            initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="lg:sticky lg:top-24 h-fit"
+            className="glass rounded-2xl p-6 h-fit sticky top-24"
           >
-            <div className="glass rounded-2xl p-6 glow">
-              <h3 className="text-lg font-bold mb-5">Book This Car</h3>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Pickup Date</label>
-                  <input
-                    type="date"
-                    value={pickupDate}
-                    onChange={(e) => { setPickupDate(e.target.value); setIsAvailable(null); }}
-                    min={new Date().toISOString().split('T')[0]}
-                    className="input-field"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Return Date</label>
-                  <input
-                    type="date"
-                    value={returnDate}
-                    onChange={(e) => { setReturnDate(e.target.value); setIsAvailable(null); }}
-                    min={pickupDate || new Date().toISOString().split('T')[0]}
-                    className="input-field"
-                  />
-                </div>
+            <h2 className="text-xl font-bold mb-6">
+              Book This Car
+            </h2>
 
-                {/* Availability Check */}
-                <button
-                  onClick={checkAvailability}
-                  className="w-full btn-secondary !py-2.5"
-                >
-                  Check Availability
-                </button>
+            <div className="space-y-4">
 
-                {isAvailable !== null && (
-                  <div className={`flex items-center gap-2 p-3 rounded-xl text-sm ${
-                    isAvailable
-                      ? 'bg-green-500/10 text-green-400 border border-green-500/20'
-                      : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                  }`}>
-                    <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      {isAvailable ? (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      ) : (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      )}
-                    </svg>
-                    {isAvailable ? 'Available for your dates!' : 'Not available for these dates'}
-                  </div>
-                )}
+              <div>
+                <label className="block text-sm mb-2">
+                  Pickup Date
+                </label>
 
-                {/* Price Breakdown */}
-                {totalDays > 0 && (
-                  <div className="p-4 rounded-xl bg-surface-dark/50 border border-slate-700/30 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-400">₹{car.pricePerDay?.toLocaleString()} × {totalDays} day{totalDays > 1 ? 's' : ''}</span>
-                      <span className="text-white">₹{totalPrice.toLocaleString()}</span>
-                    </div>
-                    <hr className="border-slate-700/50" />
-                    <div className="flex justify-between font-bold">
-                      <span>Total</span>
-                      <span className="gradient-text text-lg">₹{totalPrice.toLocaleString()}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Book Now */}
-                <button
-                  onClick={handleBooking}
-                  disabled={booking || !pickupDate || !returnDate}
-                  className="w-full btn-primary !py-3 text-base disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {booking ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Booking...
-                    </span>
-                  ) : token ? 'Book Now' : 'Sign In to Book'}
-                </button>
+                <input
+                  type="date"
+                  value={pickupDate}
+                  onChange={(e) => {
+                    setPickupDate(e.target.value);
+                    setIsAvailable(null);
+                  }}
+                  min={new Date().toISOString().split('T')[0]}
+                  className="input-field"
+                />
               </div>
+
+              <div>
+                <label className="block text-sm mb-2">
+                  Return Date
+                </label>
+
+                <input
+                  type="date"
+                  value={returnDate}
+                  onChange={(e) => {
+                    setReturnDate(e.target.value);
+                    setIsAvailable(null);
+                  }}
+                  min={pickupDate || new Date().toISOString().split('T')[0]}
+                  className="input-field"
+                />
+              </div>
+
+              <button
+                onClick={checkAvailability}
+                className="w-full btn-secondary"
+              >
+                Check Availability
+              </button>
+
+              {totalDays > 0 && (
+                <div className="bg-surface-dark/40 rounded-xl p-4 border border-slate-700/40">
+
+                  <div className="flex justify-between mb-2">
+                    <span>
+                      ₹{car.pricePerDay} × {totalDays} day
+                      {totalDays > 1 ? 's' : ''}
+                    </span>
+
+                    <span>
+                      ₹{totalPrice}
+                    </span>
+                  </div>
+
+                  <hr className="border-slate-700 my-2" />
+
+                  <div className="flex justify-between font-bold text-lg">
+
+                    <span>Total</span>
+
+                    <span className="gradient-text">
+                      ₹{totalPrice}
+                    </span>
+
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={handleBooking}
+                disabled={booking || !pickupDate || !returnDate}
+                className="w-full btn-primary disabled:opacity-50"
+              >
+                {booking
+                  ? 'Processing...'
+                  : token
+                  ? 'Book Now'
+                  : 'Sign In to Book'}
+              </button>
+
             </div>
           </motion.div>
+
         </div>
       </div>
     </div>

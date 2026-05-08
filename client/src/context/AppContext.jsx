@@ -103,15 +103,18 @@ export const AppContextProvider =
 
     // FETCH USER
     const fetchUser =
-      async () => {
+    async (customToken = token) => {
 
         try {
 
           const { data } =
             await axios.get(
-
-              `${backendUrl}/api/user/data`
-
+              `${backendUrl}/api/user/data`,
+              {
+                headers: {
+                  Authorization: `Bearer ${customToken}`,
+                },
+              }
             );
 
           if (data.success) {
@@ -221,36 +224,47 @@ export const AppContextProvider =
 
     // LOGIN
     const login =
-      async (
-        email,
-        password
-      ) => {
+    async (
+    email,
+    password
+  ) => {
 
-        try {
+    try {
 
-          await signInWithEmailAndPassword(
+      const userCredential =
+        await signInWithEmailAndPassword(
 
-            auth,
+          auth,
+          email,
+          password
 
-            email,
+        );
 
-            password
+      const firebaseToken =
+        await userCredential.user.getIdToken();
 
-          );
+      setToken(firebaseToken);
 
-          toast.success(
-            "Login Successful"
-          );
+      localStorage.setItem(
+        'token',
+        firebaseToken
+      );
 
-          setShowLogin(false);
+      await fetchUser(firebaseToken);
 
-        } catch (error) {
+      toast.success(
+        "Login Successful"
+      );
 
-          toast.error(
-            error.message
-          );
-        }
-      };
+      setShowLogin(false);
+
+    } catch (error) {
+
+      toast.error(
+        error.message
+      );
+    }
+  };
 
     // GOOGLE LOGIN
     const googleLogin =

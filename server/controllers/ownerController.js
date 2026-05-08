@@ -209,15 +209,6 @@ export const getDashboard = async (
 
       });
 
-    const pendingBookings =
-      await Booking.countDocuments({
-
-        owner: ownerId,
-
-        status: 'pending'
-
-      });
-
     const confirmedBookings =
       await Booking.countDocuments({
 
@@ -254,8 +245,6 @@ export const getDashboard = async (
         totalCars,
 
         totalBookings,
-
-        pendingBookings,
 
         confirmedBookings,
 
